@@ -7,10 +7,10 @@
     "ENABLE": true
   },
   "account2": {
-    "MT5_LOGIN": 269051569,
-    "MT5_PASSWORD": "Achal@1234",
+    "MT5_LOGIN": 269191813,
+    "MT5_PASSWORD": "Abcd#1234",
     "MT5_SERVER": "Exness-MT5Trial17",
-    "TRADE_VOLUME": 0.05,
+    "TRADE_VOLUME": 0.01,
     "ENABLE": false
   }
 }

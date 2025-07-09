@@ -8,6 +8,7 @@ import MetaTrader5 as mt5
 import openai
 import base64
 import re
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -217,7 +218,6 @@ def status():
         print("-" * 60)
         mt5.shutdown()
 
-
 # Command listener in background
 def listen_for_input():
     while True:
@@ -275,21 +275,101 @@ def send_image_to_openai(image_path):
 import MetaTrader5 as mt5
 
 # Example `openai_response`
-openai_response = {
-    "symbol": "BTCUSD",
-    "action": "buy",
-    "entry": 108814.32,
-    "sl": 108096.44,
-    "tp": 109741.50,
-    "ID": "#2157894451"
-}
+openai_response = {}
 
 # Dummy functions for now
 def updatetrade(position, openai_response):
     print(f"Updating trade {position.ticket} with new data: {openai_response}")
 
-def newtrade(openai_response):
-    print(f"Placing new trade with data: {openai_response}")
+
+def newtrade(action, tp, sl, symbol, comment, accounts_file="accounts.json"):
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("trade_log.log"),
+            logging.StreamHandler()
+        ]
+    )
+
+    # Load account details
+    try:
+        with open(accounts_file, "r") as f:
+            accounts = json.load(f)
+            logging.info(f"Loaded accounts from {accounts_file}")
+    except Exception as e:
+        logging.error(f"Failed to load accounts: {e}")
+        return
+
+    for name, account in accounts.items():
+        if not account.get("ENABLE", False):
+            logging.info(f"Skipping disabled account: {name}")
+            continue
+
+        login = account["MT5_LOGIN"]
+        password = account["MT5_PASSWORD"]
+        server = account["MT5_SERVER"]
+        volume = account.get("TRADE_VOLUME", 0.1)
+
+        # Initialize MT5
+        if not mt5.initialize():
+            logging.error(f"[{name}] Initialization failed: {mt5.last_error()}")
+            continue
+
+        # Login
+        if not mt5.login(login, password=password, server=server):
+            logging.error(f"[{name}] Login failed: {mt5.last_error()}")
+            mt5.shutdown()
+            continue
+        logging.info(f"[{name}] Logged in to account {login}")
+
+        # Check symbol
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            logging.error(f"[{name}] Symbol '{symbol}' not found")
+            mt5.shutdown()
+            continue
+        if not symbol_info.visible:
+            mt5.symbol_select(symbol, True)
+
+        # Get price
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            logging.error(f"[{name}] Failed to get tick for {symbol}")
+            mt5.shutdown()
+            continue
+
+        price = tick.ask
+        sl_price = price - sl if sl else 0.0
+        tp_price = price + tp if tp else 0.0
+
+        # Order request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+           "type": mt5.ORDER_TYPE_BUY if action == "buy" else mt5.ORDER_TYPE_SELL,
+            "price": price,
+            "sl": sl_price,
+            "tp": tp_price,
+            "deviation": 10,
+            "magic": 123456,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+        logging.info(f"[{name}] Sending market order: {request}")
+        result = mt5.order_send(request)
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logging.error(f"[{name}] Order failed: {result.retcode} - {result.comment}")
+        else:
+            logging.info(f"[{name}] Order placed successfully. Order ID: {result.order}")
+
+        mt5.shutdown()
+
 
 def tradeplace(openai_response):
     target_id = openai_response.get("ID")
@@ -317,7 +397,9 @@ def tradeplace(openai_response):
 
     if not found:
         # No existing trade with this ID, open new trade
-        newtrade(openai_response)
+        # newtrade(tp=openai_response["tp"] - openai_response["entry"], sl=openai_response["entry"] - openai_response["sl"], symbol=openai_response["symbol"], comment=f"OpenAI-ID-{openai_response['ID']}")
+        newtrade(action = openai_response["action"],tp=openai_response["tp"] - openai_response["entry"], sl=openai_response["entry"] - openai_response["sl"], symbol=openai_response["symbol"] + "m", comment=openai_response['ID'])
+
 
     mt5.shutdown()
 
