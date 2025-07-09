@@ -268,7 +268,13 @@ def send_image_to_openai(image_path):
         cleaned = re.sub(r"```(?:json)?", "", content).strip("` \n")
         print(cleaned)
         openai_response = json.loads(cleaned)
-        tradeplace(openai_response)
+
+        if isinstance(openai_response, dict):
+            openai_response = [openai_response]
+
+        for trade in openai_response:
+            tradeplace(trade)
+
     except Exception as e:
         print("❌ OpenAI error:", e)
 

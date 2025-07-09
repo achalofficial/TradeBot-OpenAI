@@ -11,6 +11,6 @@
     "MT5_PASSWORD": "Abcd#1234",
     "MT5_SERVER": "Exness-MT5Trial17",
     "TRADE_VOLUME": 0.01,
-    "ENABLE": false
+    "ENABLE": true
   }
 }

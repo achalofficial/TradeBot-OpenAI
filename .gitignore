@@ -4,3 +4,5 @@
 *.session
 *.session-journal
 *.jpg
+
+venv/
