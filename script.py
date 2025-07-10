@@ -282,34 +282,98 @@ def send_image_to_openai(image_path):
 openai_response = {}
 
 def updatetrade(position, openai_response):
-    print(f"Updating trade {position.ticket} with new data: {openai_response}")
+    # Setup logging (UTF-8 safe, no emojis)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("trade_log.log"),
+            logging.StreamHandler()
+        ]
+    )
 
-    entry_price = openai_response.get("entry")
-    if entry_price is None:
-        print("❌ Entry price not found in OpenAI response.")
+    logging.info(f"Updating trade {position.ticket} with new data: {openai_response}")
+
+    try:
+        with open("accounts.json", "r") as f:
+            accounts = json.load(f)
+    except Exception as e:
+        logging.error(f"Failed to load accounts.json: {e}")
         return False
 
-    # Prepare request to modify SL to entry
-    request = {
-        "action": mt5.TRADE_ACTION_SLTP,
-        "symbol": position.symbol,
-        "position": position.ticket,
-        "sl": entry_price,     # Move SL to entry
-        "tp": position.tp,     # Keep existing TP
-        "magic": position.magic,
-    }
+    success = False
 
-    result = mt5.order_send(request)
+    for name, account in accounts.items():
+        if not account.get("ENABLE", False):
+            continue
 
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"❌ Failed to move SL to entry: {result.retcode} - {result.comment}")
-        return False
+        login = account["MT5_LOGIN"]
+        password = account["MT5_PASSWORD"]
+        server = account["MT5_SERVER"]
 
-    print(f"✅ SL moved to entry ({entry_price}) for trade {position.ticket}")
-    return True
+        if not mt5.initialize():
+            logging.error(f"[{name}] Initialization failed: {mt5.last_error()}")
+            continue
 
+        if not mt5.login(login, password=password, server=server):
+            logging.error(f"[{name}] Login failed: {mt5.last_error()}")
+            mt5.shutdown()
+            continue
 
+        logging.info(f"[{name}] Logged in successfully")
 
+        symbol = position.symbol
+        if not mt5.symbol_select(symbol, True):
+            logging.error(f"[{name}] Failed to select symbol {symbol}")
+            mt5.shutdown()
+            continue
+
+        symbol_info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+
+        if not symbol_info or not tick:
+            logging.error(f"[{name}] Failed to get symbol or tick info for {symbol}")
+            mt5.shutdown()
+            continue
+
+        point = symbol_info.point
+        min_stop = symbol_info.trade_stops_level * point
+
+        # Determine current market price
+        current_price = tick.ask if position.type == mt5.ORDER_TYPE_BUY else tick.bid
+        new_sl = position.price_open
+
+        # Validate SL distance from current price
+        if abs(current_price - new_sl) < min_stop:
+            logging.error(
+                f"[{name}] SL too close to market price (min {min_stop:.5f}). "
+                f"Current: {current_price}, New SL: {new_sl}"
+            )
+            mt5.shutdown()
+            continue
+
+        # Send SL update request
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": symbol,
+            "position": position.ticket,
+            "sl": new_sl,
+            "tp": position.tp,
+            "magic": position.magic,
+        }
+
+        logging.info(f"[{name}] Sending SL update request: {request}")
+        result = mt5.order_send(request)
+
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            logging.info(f"[{name}] SL updated to entry ({new_sl}) for ticket {position.ticket}")
+            success = True
+        else:
+            logging.error(f"[{name}] Failed to update SL: {result.retcode} - {result.comment}")
+
+        mt5.shutdown()
+
+    return success
 
 def newtrade(action, tp, sl, symbol, comment, accounts_file="accounts.json"):
     # Setup logging
