@@ -278,14 +278,37 @@ def send_image_to_openai(image_path):
     except Exception as e:
         print("❌ OpenAI error:", e)
 
-import MetaTrader5 as mt5
-
 # Example `openai_response`
 openai_response = {}
 
-# Dummy functions for now
 def updatetrade(position, openai_response):
     print(f"Updating trade {position.ticket} with new data: {openai_response}")
+
+    entry_price = openai_response.get("entry")
+    if entry_price is None:
+        print("❌ Entry price not found in OpenAI response.")
+        return False
+
+    # Prepare request to modify SL to entry
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": position.symbol,
+        "position": position.ticket,
+        "sl": entry_price,     # Move SL to entry
+        "tp": position.tp,     # Keep existing TP
+        "magic": position.magic,
+    }
+
+    result = mt5.order_send(request)
+
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"❌ Failed to move SL to entry: {result.retcode} - {result.comment}")
+        return False
+
+    print(f"✅ SL moved to entry ({entry_price}) for trade {position.ticket}")
+    return True
+
+
 
 
 def newtrade(action, tp, sl, symbol, comment, accounts_file="accounts.json"):
@@ -395,8 +418,9 @@ def tradeplace(openai_response):
 
     if positions:
         for pos in positions:
-            if pos.comment == target_id:
-                # ID matches, update the trade
+            comment_id = re.sub(r'\D', '', str(pos.comment))
+            clean_target_id = re.sub(r'\D', '', str(target_id))
+            if comment_id == clean_target_id:
                 updatetrade(pos, openai_response)
                 found = True
                 break
@@ -411,9 +435,6 @@ def tradeplace(openai_response):
 
 # Call it
 tradeplace(openai_response)
-
-
-
 
 # Main polling loop
 try:
