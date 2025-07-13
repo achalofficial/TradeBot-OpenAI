@@ -273,6 +273,7 @@ def send_image_to_openai(image_path):
             openai_response = [openai_response]
 
         for trade in openai_response:
+            # print(trade)
             tradeplace(trade)
 
     except Exception as e:
@@ -281,100 +282,212 @@ def send_image_to_openai(image_path):
 # Example `openai_response`
 openai_response = {}
 
-def updatetrade(position, openai_response):
-    # Setup logging (UTF-8 safe, no emojis)
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler("trade_log.log"),
-            logging.StreamHandler()
-        ]
-    )
+# def updatetrade(position, openai_response):
+#     # Setup logging (UTF-8 safe, no emojis)
+#     logging.basicConfig(
+#         level=logging.INFO,
+#         format='%(asctime)s - %(levelname)s - %(message)s',
+#         handlers=[
+#             logging.FileHandler("trade_log.log"),
+#             logging.StreamHandler()
+#         ]
+#     )
 
-    logging.info(f"Updating trade {position.ticket} with new data: {openai_response}")
+#     logging.info(f"Updating trade {position.ticket} with new data: {openai_response}")
+
+#     try:
+#         with open("accounts.json", "r") as f:
+#             accounts = json.load(f)
+#     except Exception as e:
+#         logging.error(f"Failed to load accounts.json: {e}")
+#         return False
+
+#     success = False
+
+#     for name, account in accounts.items():
+#         if not account.get("ENABLE", False):
+#             continue
+
+#         login = account["MT5_LOGIN"]
+#         password = account["MT5_PASSWORD"]
+#         server = account["MT5_SERVER"]
+
+#         if not mt5.initialize():
+#             logging.error(f"[{name}] Initialization failed: {mt5.last_error()}")
+#             continue
+
+#         if not mt5.login(login, password=password, server=server):
+#             logging.error(f"[{name}] Login failed: {mt5.last_error()}")
+#             mt5.shutdown()
+#             continue
+
+#         logging.info(f"[{name}] Logged in successfully")
+
+#         symbol = position.symbol
+#         if not mt5.symbol_select(symbol, True):
+#             logging.error(f"[{name}] Failed to select symbol {symbol}")
+#             mt5.shutdown()
+#             continue
+
+#         symbol_info = mt5.symbol_info(symbol)
+#         tick = mt5.symbol_info_tick(symbol)
+
+#         if not symbol_info or not tick:
+#             logging.error(f"[{name}] Failed to get symbol or tick info for {symbol}")
+#             mt5.shutdown()
+#             continue
+
+#         point = symbol_info.point
+#         min_stop = symbol_info.trade_stops_level * point
+
+#         # Determine current market price
+#         current_price = tick.ask if position.type == mt5.ORDER_TYPE_BUY else tick.bid
+#         new_sl = position.price_open
+
+#         # Validate SL distance from current price
+#         if abs(current_price - new_sl) < min_stop:
+#             logging.error(
+#                 f"[{name}] SL too close to market price (min {min_stop:.5f}). "
+#                 f"Current: {current_price}, New SL: {new_sl}"
+#             )
+#             mt5.shutdown()
+#             continue
+
+#         # Send SL update request
+#         request = {
+#             "action": mt5.TRADE_ACTION_SLTP,
+#             "symbol": symbol,
+#             "position": position.ticket,
+#             "sl": new_sl,
+#             "tp": position.tp,
+#             "magic": position.magic,
+#         }
+
+#         logging.info(f"[{name}] Sending SL update request: {request}")
+#         result = mt5.order_send(request)
+
+#         if result.retcode == mt5.TRADE_RETCODE_DONE:
+#             logging.info(f"[{name}] SL updated to entry ({new_sl}) for ticket {position.ticket}")
+#             success = True
+#         else:
+#             logging.error(f"[{name}] Failed to update SL: {result.retcode} - {result.comment}")
+
+#         mt5.shutdown()
+
+#     return success
+
+# Close All Trade 
+def closeAll():
+    print("Closing all open trades on all accounts...")
 
     try:
-        with open("accounts.json", "r") as f:
-            accounts = json.load(f)
+        with open('accounts.json', 'r') as file:
+            accounts = json.load(file)
+
+        for account_name, account_data in accounts.items():
+            server = account_data.get('MT5_SERVER', '')
+            login = int(account_data['MT5_LOGIN'])
+            password = account_data['MT5_PASSWORD']
+
+            # Initialize connection
+            if not mt5.initialize(server=server, login=login, password=password):
+                print(f"❌ Failed to connect: {account_name} ({server})")
+                continue
+
+            print(f"\n✅ Connected: {account_name} ({server})")
+
+            positions = mt5.positions_get()
+
+            if positions is None or len(positions) == 0:
+                print("No open positions.")
+            else:
+                for pos in positions:
+                    ticket = pos.ticket
+                    symbol = pos.symbol
+                    volume = pos.volume
+                    position_type = pos.type  # 0 = BUY, 1 = SELL
+
+                    # Prepare opposite order type to close
+                    if position_type == mt5.ORDER_TYPE_BUY:
+                        order_type = mt5.ORDER_TYPE_SELL
+                    else:
+                        order_type = mt5.ORDER_TYPE_BUY
+
+                    # Prepare close request
+                    close_request = {
+                        "action": mt5.TRADE_ACTION_DEAL,
+                        "symbol": symbol,
+                        "volume": volume,
+                        "type": order_type,
+                        "position": ticket,
+                        "deviation": 20,
+                        "magic": 0,
+                        "comment": "Closed by closeAll()"
+                    }
+
+                    # Send order
+                    result = mt5.order_send(close_request)
+                    if result.retcode == mt5.TRADE_RETCODE_DONE:
+                        print(f"✅ Closed {symbol} position (ticket {ticket})")
+                    else:
+                        print(f"❌ Failed to close {symbol} position (ticket {ticket}): {result.retcode}")
+
+            mt5.shutdown()
+
+    except FileNotFoundError:
+        print("❌ accounts.json file not found.")
     except Exception as e:
-        logging.error(f"Failed to load accounts.json: {e}")
-        return False
+        print(f"❌ An error occurred: {e}")
 
-    success = False
+# Total Balance ( Real Accounts Only)
+def totalBalance():
+    print("Calculating Total Balance...")
 
-    for name, account in accounts.items():
-        if not account.get("ENABLE", False):
-            continue
+    try:
+        with open('accounts.json', 'r') as file:
+            accounts = json.load(file)
 
-        login = account["MT5_LOGIN"]
-        password = account["MT5_PASSWORD"]
-        server = account["MT5_SERVER"]
+        total = 0.0
 
-        if not mt5.initialize():
-            logging.error(f"[{name}] Initialization failed: {mt5.last_error()}")
-            continue
+        print("\nBalances for accounts with 'Real' server:\n")
 
-        if not mt5.login(login, password=password, server=server):
-            logging.error(f"[{name}] Login failed: {mt5.last_error()}")
-            mt5.shutdown()
-            continue
+        for account_name, account_data in accounts.items():
+            server = account_data.get('MT5_SERVER', '')
 
-        logging.info(f"[{name}] Logged in successfully")
+            if 'Real' in server:
+                login = int(account_data['MT5_LOGIN'])
+                password = account_data['MT5_PASSWORD']
 
-        symbol = position.symbol
-        if not mt5.symbol_select(symbol, True):
-            logging.error(f"[{name}] Failed to select symbol {symbol}")
-            mt5.shutdown()
-            continue
+                # Initialize connection
+                if not mt5.initialize(server=server, login=login, password=password):
+                    print(f"❌ Failed to connect: {account_name} ({server})")
+                    continue
 
-        symbol_info = mt5.symbol_info(symbol)
-        tick = mt5.symbol_info_tick(symbol)
+                # Get account info
+                account_info = mt5.account_info()
+                if account_info:
+                    balance = account_info.balance
+                    print(f"Account: {account_name}")
+                    print(f"  Server: {server}")
+                    print(f"  Balance: {balance}\n")
+                    total += balance
+                else:
+                    print(f"❌ Could not get account info: {account_name}")
 
-        if not symbol_info or not tick:
-            logging.error(f"[{name}] Failed to get symbol or tick info for {symbol}")
-            mt5.shutdown()
-            continue
+                mt5.shutdown()
 
-        point = symbol_info.point
-        min_stop = symbol_info.trade_stops_level * point
+        print(f"Total Money in all 'Real' accounts: {total}")
 
-        # Determine current market price
-        current_price = tick.ask if position.type == mt5.ORDER_TYPE_BUY else tick.bid
-        new_sl = position.price_open
+    except FileNotFoundError:
+        print("❌ accounts.json file not found.")
+    except Exception as e:
+        print(f"❌ An error occurred: {e}")
 
-        # Validate SL distance from current price
-        if abs(current_price - new_sl) < min_stop:
-            logging.error(
-                f"[{name}] SL too close to market price (min {min_stop:.5f}). "
-                f"Current: {current_price}, New SL: {new_sl}"
-            )
-            mt5.shutdown()
-            continue
+# Boiler Plate for Update Trade
+def updatetrade(position, openai_response):
+    print("Updating {position} :", openai_response)
 
-        # Send SL update request
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": symbol,
-            "position": position.ticket,
-            "sl": new_sl,
-            "tp": position.tp,
-            "magic": position.magic,
-        }
-
-        logging.info(f"[{name}] Sending SL update request: {request}")
-        result = mt5.order_send(request)
-
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
-            logging.info(f"[{name}] SL updated to entry ({new_sl}) for ticket {position.ticket}")
-            success = True
-        else:
-            logging.error(f"[{name}] Failed to update SL: {result.retcode} - {result.comment}")
-
-        mt5.shutdown()
-
-    return success
-
+# New Trade
 def newtrade(action, tp, sl, symbol, comment, accounts_file="accounts.json"):
     # Setup logging
     logging.basicConfig(
@@ -463,7 +576,7 @@ def newtrade(action, tp, sl, symbol, comment, accounts_file="accounts.json"):
 
         mt5.shutdown()
 
-
+# Trade Placement
 def tradeplace(openai_response):
     target_id = openai_response.get("ID")
     if not target_id:
@@ -526,6 +639,10 @@ try:
                 testTrade()
             elif cmd == "status":
                 status()
+            elif cmd == "balance":
+                totalBalance()
+            elif cmd == "closeAll":
+                closeAll()
             elif cmd == "exit":
                 print("👋 Exiting...")
                 raise KeyboardInterrupt
