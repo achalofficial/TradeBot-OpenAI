@@ -621,12 +621,13 @@ try:
         if messages:
             msg = messages[0]
             if msg.id != last_msg_id:
-                print(f"🆕 {msg.date} - {msg.sender_id}: {msg.text}")
-                last_msg_id = msg.id
-                if msg.photo:
-                    file_path = client.download_media(msg, file=f"photo_{msg.id}.jpg")
-                    # print(f"✅ Photo saved: {file_path}")
-                    send_image_to_openai(file_path)
+                if msg.text and 'new' in msg.text.lower():
+                    print(f"🆕 {msg.date} - {msg.sender_id}: {msg.text}")
+                    last_msg_id = msg.id
+                    if msg.photo:
+                        file_path = client.download_media(msg, file=f"photo_{msg.id}.jpg")
+                        # print(f"✅ Photo saved: {file_path}")
+                        send_image_to_openai(file_path)
 
         # Handle user commands
         while command_queue:
