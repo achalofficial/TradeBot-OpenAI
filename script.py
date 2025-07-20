@@ -483,6 +483,31 @@ def totalBalance():
     except Exception as e:
         print(f"❌ An error occurred: {e}")
 
+# Refresh 
+def refresh():
+    print("🔄 Running refresh process...")
+
+    try:
+        messages = client.get_messages(TARGET_GROUP_ID, limit=1)
+        if messages:
+            msg = messages[0]
+            print(f"🆕 Latest message ID: {msg.id}")
+            if msg.text and 'new' in msg.text.lower():
+                print(f"🆕 {msg.date} - {msg.sender_id}: {msg.text}")
+                last_msg_id = msg.id
+                if msg.photo:
+                    file_path = client.download_media(msg, file=f"photo_{msg.id}.jpg")
+                    # print(f"✅ Photo saved: {file_path}")
+                    send_image_to_openai(file_path)
+            else:
+                print("Message content ->", msg.text)
+        else:
+            print("⚠️ No messages found in the group.")
+
+    except Exception as e:
+        print(f"❌ Error during refresh: {e}")
+
+
 # Boiler Plate for Update Trade
 def updatetrade(position, openai_response):
     print("Updating {position} :", openai_response)
@@ -644,6 +669,8 @@ try:
                 totalBalance()
             elif cmd == "closeAll":
                 closeAll()
+            elif cmd == "refresh":
+                refresh()
             elif cmd == "exit":
                 print("👋 Exiting...")
                 raise KeyboardInterrupt
